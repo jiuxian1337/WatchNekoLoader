@@ -19,7 +19,7 @@
 1. 把 `WatchNekoLoader-<版本>.jar` 放进 `plugins/`；
 2. 启动服务端。
 
-需要 Java 21+。另外 WatchNeko 自己依赖的插件（例如 packetevents，取决于你用的是哪份构建）也要装好。
+需要 Java 21+。
 
 ## 构建
 
@@ -28,9 +28,3 @@
 ```
 
 产物在 `build/libs/`。
-
-## 说明
-
-- 站点地址写在 `WatchNekoLoaderPlugin.SITE`，换域名时改这一处。
-- 已经在运行的 WatchNeko 卸不掉（Bukkit 没有卸载插件的 API），所以更新版本要重启服务端。
-- 从旧的手工安装迁过来时，WatchNeko 的配置与数据库位置可能会变，启动日志里会有提示。
