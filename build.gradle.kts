@@ -42,7 +42,7 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.shadowJar {
     archiveFileName.set("${rootProject.name}-${project.version}.jar")
     // 服务端已经有一份 Gson 时，插件类加载器仍可能看不到它，重定位后互不干扰
-    relocate("com.google.gson", "cc.watchneko.loader.libs.gson")
+    relocate("com.google", "cc.watchneko.loader.libs")
 }
 
 tasks.named("assemble") {
@@ -72,32 +72,14 @@ bukkit {
         "PlaceholderAPI",
     )
 
-    commands {
-        register("watchnekoloader") {
-            description = "查看/更新由本加载器托管的 WatchNeko"
-            aliases = listOf("wnl", "wnloader")
-            usage = "/watchnekoloader <status|check|update|reload>"
-            permission = "watchneko.loader.command"
-        }
-    }
-
-    permissions {
-        register("watchneko.loader.command") {
-            description = "使用 /watchnekoloader 的基础子命令（status、check）"
-            default = net.minecrell.pluginyml.bukkit.BukkitPluginDescription.Permission.Default.OP
-        }
-
-        register("watchneko.loader.update") {
-            description = "执行会改动服务端文件的子命令（update、reload）"
-            default = net.minecrell.pluginyml.bukkit.BukkitPluginDescription.Permission.Default.OP
-        }
-    }
+    // 本插件不注册任何命令：它的全部工作发生在服务端启动过程中，
+    // 更新也由下次开服自动完成，没有需要玩家或管理员手动触发的动作。
 }
 
 tasks.runServer {
-    // 这里不能用 1.8.8：run-paper 用的是本项目的 Java 工具链（21）去起服务端，
-    // 而 1.8.8 的 patcher 和服务端都跑不了 Java 21（实测报 "Failed to patch vanilla jar"）。
-    // WatchNeko 本身要求 Java 17+，所以开发服只能用现代版本。
+    // 1.8.8 是 WatchNeko 最主要支持的版本，开发服跟着主要使用场景走。
+    // 注意：run-paper 用本项目的 Java 工具链（21）起服务端，1.8.8 的 patcher 在 Java 21 下
+    // 可能报 "Failed to patch vanilla jar"；真遇到就换低版本 JDK 单独跑这个任务。
     minecraftVersion("1.8.8")
     systemProperty("com.mojang.eula.agree", "true")
     jvmArgs("-Xmx2G", "-Xms2G")

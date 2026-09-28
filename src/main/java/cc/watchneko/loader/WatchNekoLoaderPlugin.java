@@ -6,12 +6,14 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.logging.Level;
 
 /**
  * 从 WatchNekoWebSite 拉取最新 WatchNeko，在服务端启动时把它加载起来。
  *
  * <p>启动流程：清掉上次遗留的 jar → 查版本、下载、校验 → 加载并启用 → 删掉下载下来的 jar。
  * 下载失败最多重试 {@value #MAX_ATTEMPTS} 次，仍然失败就关服——没有反作弊就不开服。
+ * 下载成功但加载失败同样关服，且这种情况下保留 jar 供排查。
  *
  * <p>本类只管编排，具体怎么查版本见 {@link WatchNekoSiteClient}，怎么下载校验见
  * {@link ArtifactDownloader}。
@@ -41,13 +43,14 @@ public final class WatchNekoLoaderPlugin extends JavaPlugin {
             return;
         }
 
-        loadAndEnable(jar);
-        deleteAfterLoad(jar);
-    }
+        if (!loadAndEnable(jar)) {
+            getLogger().severe("WatchNeko 没能加载起来，没有反作弊就不开服了");
+            getLogger().severe("下载的 jar 保留在 " + jar + "，可据此排查问题");
+            getServer().shutdown();
+            return;
+        }
 
-    @Override
-    public void onDisable() {
-        // Plugin shutdown logic
+        deleteAfterLoad(jar);
     }
 
     /** 反复尝试下载，全部失败返回 {@code null}。 */
@@ -65,15 +68,27 @@ public final class WatchNekoLoaderPlugin extends JavaPlugin {
         return null;
     }
 
-    /** 加载并启用。目标插件在 onLoad / onEnable 里抛的任何东西都不该把加载器一起带走。 */
-    private void loadAndEnable(Path jar) {
+    /**
+     * 加载并启用。
+     *
+     * <p>{@code loadPlugin} 只登记插件，不会触发 {@code onLoad}——那是服务端加载普通插件时自己做的，
+     * 这里绕过了那条路径，所以要手动补上，否则 WatchNeko 会跳过它的初始化。
+     *
+     * <p>目标插件在 onLoad / onEnable 里抛的任何东西都不该把加载器一起带走，但也绝不能吞掉：
+     * 加载失败意味着服务端即将在无防护状态下运行，这个结果由调用方处理。
+     *
+     * @return 是否成功加载并启用
+     */
+    private boolean loadAndEnable(Path jar) {
         try {
             getLogger().info("正在加载最新最热WatchNeko");
             Plugin plugin = getServer().getPluginManager().loadPlugin(jar.toFile());
             plugin.onLoad();
             getServer().getPluginManager().enablePlugin(plugin);
+            return true;
         } catch (Exception e) {
-            e.printStackTrace();
+            getLogger().log(Level.SEVERE, "WatchNeko 加载失败", e);
+            return false;
         }
     }
 
