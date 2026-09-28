@@ -78,8 +78,6 @@ bukkit {
 
 tasks.runServer {
     // 1.8.8 是 WatchNeko 最主要支持的版本，开发服跟着主要使用场景走。
-    // 注意：run-paper 用本项目的 Java 工具链（21）起服务端，1.8.8 的 patcher 在 Java 21 下
-    // 可能报 "Failed to patch vanilla jar"；真遇到就换低版本 JDK 单独跑这个任务。
     minecraftVersion("1.8.8")
     systemProperty("com.mojang.eula.agree", "true")
     jvmArgs("-Xmx2G", "-Xms2G")
