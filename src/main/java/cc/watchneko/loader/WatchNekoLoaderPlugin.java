@@ -47,7 +47,7 @@ public final class WatchNekoLoaderPlugin extends JavaPlugin {
         deleteLeftoverJars();
 
         ArtifactDownloader downloader =
-                new ArtifactDownloader(getDataFolder().toPath(), getLogger());
+                new ArtifactDownloader(getDataFolder().getParentFile().toPath(), getLogger());
 
         Path jar = downloadWithRetry(new ReleaseClient(getLogger()), downloader);
         if (jar == null) {
