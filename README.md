@@ -4,7 +4,7 @@
 
 **每次开服，自动用上最新的反作弊。**
 
-你什么都不用做。把文件放进服务器，以后每次开服它都会自己去下载最新的 [WatchNeko](https://github.com/jiuxian1337/WatchNeko) 反作弊，装好，然后删掉下载的临时文件。
+你什么都不用做。把文件放进服务器，以后每次开服它都会自己从 [WatchNeko 的 GitHub Releases](https://github.com/jiuxian1337/WatchNeko/releases) 下载最新的反作弊，装好，然后删掉下载的临时文件。
 
 [![Java](https://img.shields.io/badge/Java-21%2B-orange?logo=openjdk&logoColor=white)](https://adoptium.net/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.8%20~%201.21-green)](https://www.spigotmc.org/)
@@ -62,6 +62,8 @@
 
 网络出问题的时候会重试，一共试 3 次，每次相隔 2 秒。
 
+官方 GitHub 和镜像站会同时尝试，哪个先通就用哪个，所以某一边被墙了也不会卡住开服。
+
 三次都没成功的话，**服务器会直接关闭，不会启动**。
 
 下载成功但反作弊没能装起来（比如文件本身有问题），结果也一样——**关服，不会硬着头皮开着**。这种情况下下载的文件会保留下来，方便你查原因。
@@ -86,7 +88,7 @@
 Spigot、Paper 以及它们的分支都支持，Folia 也支持。Minecraft 1.8 到 1.21 都可以。如果你装的其他插件比较多，也不用担心冲突。
 
 **官网打不开怎么办？**
-重试 3 次后服务器会关闭。等官网恢复正常再开服就好。
+反作弊现在已经直接从 GitHub Releases 下载，同时也会尝试镜像站，两条路只要有一条通就能装好。两边都连不上时才会在重试 3 次后关服，等网络恢复再开服就好。
 
 ## 还是没弄好？
 
@@ -103,6 +105,7 @@ Spigot、Paper 以及它们的分支都支持，Folia 也支持。Minecraft 1.8 
 | 项目 | 说明 |
 |---|---|
 | [WatchNeko](https://github.com/jiuxian1337/WatchNeko) | 反作弊本体，本插件自动下载的就是它 |
+| [WatchNeko Releases](https://github.com/jiuxian1337/WatchNeko/releases) | 下载来源，每次开服都从这里的「最新版本」取 |
 
 ## 许可
 

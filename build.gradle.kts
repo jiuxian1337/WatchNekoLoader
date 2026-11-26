@@ -10,7 +10,7 @@ plugins {
 
 group = "cc.watchneko"
 version = SimpleDateFormat("yy.MM.dd").format(Date())
-description = "在服务端启动时从 WatchNekoWebSite 拉取并加载最新 WatchNeko 反作弊"
+description = "在服务端启动时从 GitHub Releases 拉取并加载最新 WatchNeko 反作弊"
 
 repositories {
     mavenCentral()
