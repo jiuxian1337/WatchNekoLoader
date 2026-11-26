@@ -17,12 +17,13 @@
 package cc.watchneko.loader;
 
 /**
- * 站点上的一条版本记录。
+ * 一个可以下载产物的地址，带上用于日志的名字。
  *
- * @param version     版本号，例如 {@code 26.09.27}
- * @param downloadUrl 产物下载地址。站点不提供下载接口，这个地址是客户端拼出来的
- * @param fileHash    产物的 SHA-256（小写十六进制）。迁移过来的历史版本没有，此时为 {@code null}，
- *                    下载完会跳过校验
+ * <p>同一个版本通常有两个来源：GitHub 官方和镜像站。两者内容相同，
+ * 区别只在网络路径，所以谁快就用谁。
+ *
+ * @param label 展示给用户的名字，例如 {@code 官方}、{@code 镜像站}
+ * @param url   产物直链
  */
-public record VersionInfo(String version, String downloadUrl, String fileHash) {
+public record DownloadSource(String label, String url) {
 }

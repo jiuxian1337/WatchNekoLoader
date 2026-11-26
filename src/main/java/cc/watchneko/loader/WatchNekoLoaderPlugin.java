@@ -25,19 +25,16 @@ import java.nio.file.Path;
 import java.util.logging.Level;
 
 /**
- * 从 WatchNekoWebSite 拉取最新 WatchNeko，在服务端启动时把它加载起来。
+ * 从 GitHub Releases 拉取最新 WatchNeko，在服务端启动时把它加载起来。
  *
  * <p>启动流程：清掉上次遗留的 jar → 查版本、下载、校验 → 加载并启用 → 删掉下载下来的 jar。
  * 下载失败最多重试 {@value #MAX_ATTEMPTS} 次，仍然失败就关服——没有反作弊就不开服。
  * 下载成功但加载失败同样关服，且这种情况下保留 jar 供排查。
  *
- * <p>本类只管编排，具体怎么查版本见 {@link WatchNekoSiteClient}，怎么下载校验见
+ * <p>本类只管编排，具体怎么查版本见 {@link ReleaseClient}，怎么下载校验见
  * {@link ArtifactDownloader}。
  */
 public final class WatchNekoLoaderPlugin extends JavaPlugin {
-
-    /** 站点地址，换域名改这一处。 */
-    private static final String SITE = "https://watchneko.zkmjnic.tech";
 
     /** 下载失败时的总尝试次数，用完还失败就关服。 */
     private static final int MAX_ATTEMPTS = 3;
@@ -49,10 +46,10 @@ public final class WatchNekoLoaderPlugin extends JavaPlugin {
     public void onEnable() {
         deleteLeftoverJars();
 
-        ArtifactDownloader downloader = new ArtifactDownloader(
-                new WatchNekoSiteClient(SITE, getLogger()), getDataFolder().toPath(), getLogger());
+        ArtifactDownloader downloader =
+                new ArtifactDownloader(getDataFolder().toPath(), getLogger());
 
-        Path jar = downloadWithRetry(downloader);
+        Path jar = downloadWithRetry(new ReleaseClient(getLogger()), downloader);
         if (jar == null) {
             getLogger().severe("连续 " + MAX_ATTEMPTS + " 次都没能下到 WatchNeko，没有反作弊就不开服了");
             getServer().shutdown();
@@ -70,10 +67,12 @@ public final class WatchNekoLoaderPlugin extends JavaPlugin {
     }
 
     /** 反复尝试下载，全部失败返回 {@code null}。 */
-    private Path downloadWithRetry(ArtifactDownloader downloader) {
+    private Path downloadWithRetry(ReleaseClient client, ArtifactDownloader downloader) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return downloader.download();
+                // 每次重试都重新查版本：上一次可能只是某个来源网络抖动，换一条路就通了
+                ReleaseInfo release = client.fetchLatest();
+                return downloader.download(release);
             } catch (Exception e) {
                 getLogger().warning("第 " + attempt + "/" + MAX_ATTEMPTS + " 次下载失败：" + e);
                 if (attempt == MAX_ATTEMPTS || !delay()) {

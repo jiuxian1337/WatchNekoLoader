@@ -19,84 +19,95 @@ package cc.watchneko.loader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.HexFormat;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 /**
- * 把站点上的产物下到本地。
+ * 把 release 里的产物下到本地。
  *
- * <p>下载过程中每前进 10% 打一条进度。SHA-256 是边读边算的——不能为了校验把几百 MB 再读第二遍。
+ * <p>多个来源由 {@link SourceRacer} 并发竞争，先响应且校验通过的那个胜出；
+ * 胜出的来源如果半路断了，剩下的来源里没有第二个已建立的连接可接手，
+ * 由上层重试兜住（重试会重新竞争一次）。
+ *
+ * <p>下载过程中每前进 10% 打一条进度。SHA-256 是边读边算的——不能为了校验把文件再读第二遍。
  * 校验不过就把文件删掉并抛异常，由上层决定要不要重试。
  */
 public final class ArtifactDownloader {
 
     private static final int BAR_WIDTH = 20;
-    private static final String USER_AGENT = "jiuxian-baka-WatchNekoLoader/1.0";
 
-    private final WatchNekoSiteClient site;
     private final Path directory;
     private final Logger logger;
+    private final SourceRacer racer;
 
-    private final HttpClient http = HttpClient.newBuilder()
-            // 静态站/CDN 常用 302 把请求转到别处
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
-
-    public ArtifactDownloader(WatchNekoSiteClient site, Path directory, Logger logger) {
-        this.site = site;
+    public ArtifactDownloader(Path directory, Logger logger) {
         this.directory = directory;
         this.logger = logger;
+        this.racer = new SourceRacer(logger);
     }
 
     /**
-     * 查询最新版本并下载到 {@code directory}。
+     * 把 {@code release} 的产物下载到 {@code directory}。
      *
      * @return 下好的 jar 的路径
-     * @throws Exception 查询失败、下载失败，或 SHA-256 校验不通过
+     * @throws Exception 所有来源都失败，或 SHA-256 校验不通过
      */
-    public Path download() throws Exception {
-        VersionInfo version = site.fetchLatest();
-
+    public Path download(ReleaseInfo release) throws Exception {
         Files.createDirectories(directory);
-        Path jar = directory.resolve(version.version() + ".jar");
+        // 文件名直接取 release 里的产物名：它和真实 asset 一致，用版本号拼会拼错
+        Path jar = directory.resolve(release.assetName());
 
         logger.info("准备开始下载最新最热WatchNeko");
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(version.downloadUrl()))
-                .header("User-Agent", USER_AGENT)
-                .build();
+        SourceRacer.Hit hit = racer.fetchFirst(release.sources());
 
-        HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        if (response.statusCode() != 200) {
-            throw new IllegalStateException("下载地址返回 HTTP " + response.statusCode());
+        // 胜出的响应体归这里管；无论后面成功与否都要关掉，否则连接会一直挂着
+        try (InputStream body = hit.response().body()) {
+            long total = hit.response().headers().firstValueAsLong("Content-Length").orElse(-1L);
+
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long received = copy(body, jar, digest, total);
+
+            // 没有哈希可比时（Atom 兜底路径），长度就是唯一的完整性依据：
+            // 连接在最后一个完整缓冲区处断开时 read 会正常返回 -1，不比对就会把残缺的 jar 当成功
+            if (total > 0 && received != total) {
+                throw new IllegalStateException(
+                        "下载不完整（应为 " + total + " 字节，实际 " + received + " 字节）");
+            }
+
+            logger.info("下载完成，共 " + received + " 字节（来源：" + hit.source().label() + "）");
+            verify(digest.digest(), release, jar);
+            return jar;
         }
-
-        long total = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
-
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        long received = copy(response.body(), jar, digest, total);
-        logger.info("下载完成，共 " + received + " 字节");
-
-        verify(digest.digest(), version, jar);
-        return jar;
     }
 
-    /** 一边写文件一边喂摘要器，顺便按进度打点。 */
+    /**
+     * 一边写文件一边喂摘要器，顺便按进度打点。
+     *
+     * <p>读 body 时 HttpRequest 的超时已经失效了（它只管到响应头），所以单靠它挡不住
+     * 「连上了、头也回来了、然后一个字节都不再来」——那会让开服无限期挂着。
+     * 这里用一个看门狗盯着最后一次收到数据的时间，超过 {@link #STALL_TIMEOUT} 就关流，
+     * 让 {@code read} 抛异常，交给上层重试。
+     */
     private long copy(InputStream in, Path jar, MessageDigest digest, long total) throws IOException {
         long received = 0;
         int lastStep = -1;
+        StallWatchdog watchdog = StallWatchdog.start(in);
 
         try (in; OutputStream out = Files.newOutputStream(jar)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
+                watchdog.progress();
                 out.write(buffer, 0, read);
                 digest.update(buffer, 0, read);
                 received += read;
@@ -109,6 +120,8 @@ public final class ArtifactDownloader {
                     }
                 }
             }
+        } finally {
+            watchdog.stop();
         }
 
         // 收个尾：某次读取正好跨过 100% 时循环里已经打过了，避免重复
@@ -118,22 +131,71 @@ public final class ArtifactDownloader {
         return received;
     }
 
+    /** 在后台盯着传输是否卡死，卡住就关掉流。 */
+    private static final class StallWatchdog {
+
+        private static final Duration STALL_TIMEOUT = Duration.ofSeconds(30);
+        private static final Duration CHECK_INTERVAL = Duration.ofSeconds(5);
+
+        private final InputStream stream;
+        private final AtomicLong lastActivity = new AtomicLong(System.nanoTime());
+        private final AtomicBoolean stopped = new AtomicBoolean();
+        private final ScheduledExecutorService scheduler;
+
+        private StallWatchdog(InputStream stream) {
+            this.stream = stream;
+            this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "WatchNekoLoader-stall-watchdog");
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+
+        static StallWatchdog start(InputStream stream) {
+            StallWatchdog watchdog = new StallWatchdog(stream);
+            long timeoutNanos = STALL_TIMEOUT.toNanos();
+            watchdog.scheduler.scheduleWithFixedDelay(() -> {
+                if (System.nanoTime() - watchdog.lastActivity.get() <= timeoutNanos) {
+                    return;
+                }
+                // 关流会让阻塞中的 read 抛 IOException，异常里有这条信息可供排查
+                watchdog.stop();
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                    // 已经断了
+                }
+            }, CHECK_INTERVAL.toMillis(), CHECK_INTERVAL.toMillis(), TimeUnit.MILLISECONDS);
+            return watchdog;
+        }
+
+        void progress() {
+            lastActivity.set(System.nanoTime());
+        }
+
+        void stop() {
+            if (stopped.compareAndSet(false, true)) {
+                scheduler.shutdownNow();
+            }
+        }
+    }
+
     /**
-     * 比对站点登记的 SHA-256。
+     * 比对 release 登记的 SHA-256。
      *
-     * <p>迁移过来的历史版本没有 fileHash，那种情况只打一条警告，不能让整次下载作废。
+     * <p>走 Atom 兜底路径时拿不到哈希，那种情况只打一条警告，不能让整次下载作废。
      */
-    private void verify(byte[] hash, VersionInfo version, Path jar) throws IOException {
-        if (version.fileHash() == null) {
-            logger.warning("站点没有登记这个版本的 SHA-256，跳过哈希校验");
+    private void verify(byte[] hash, ReleaseInfo release, Path jar) throws IOException {
+        if (release.sha256() == null) {
+            logger.warning("没拿到这个版本的 SHA-256，跳过哈希校验");
             return;
         }
 
         String actual = HexFormat.of().formatHex(hash);
-        if (!actual.equalsIgnoreCase(version.fileHash())) {
+        if (!actual.equalsIgnoreCase(release.sha256())) {
             Files.deleteIfExists(jar);
             throw new IllegalStateException(
-                    "SHA-256 校验失败（站点登记 " + version.fileHash() + "，实际 " + actual + "）");
+                    "SHA-256 校验失败（release 登记 " + release.sha256() + "，实际 " + actual + "）");
         }
         logger.info("SHA-256 校验通过：" + actual);
     }
